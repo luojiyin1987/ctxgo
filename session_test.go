@@ -45,8 +45,13 @@ func TestSessionLifecycleAndPersistence(t *testing.T) {
 		t.Fatalf("snapshot = %+v", snapshot)
 	}
 	if snapshot.Events[0].ID >= snapshot.Events[1].ID ||
-		snapshot.Events[1].ID >= snapshot.Events[2].ID {
-		t.Fatalf("events not chronological: %+v", snapshot.Events)
+		snapshot.Events[1].ID >= snapshot.Events[2].ID || !snapshot.More {
+		t.Fatalf("events not chronological or missing cursor: %+v", snapshot)
+	}
+	prior, err := loadSessionBefore(db, id, 3, snapshot.Events[0].ID)
+	if err != nil || len(prior.Events) != 2 || prior.More ||
+		prior.Events[0].Kind != "constraint" || prior.Events[1].Kind != "decision" {
+		t.Fatalf("older event page: %+v err=%v", prior, err)
 	}
 	if err := closeSession(db, id); err != nil {
 		t.Fatal(err)
@@ -186,6 +191,11 @@ func TestSessionCLI(t *testing.T) {
 		!strings.Contains(response, "Keep SQLite storage") ||
 		strings.Contains(response, "Avoid changing public API") {
 		t.Fatalf("show: code=%d out=%q err=%q", code, response, stderr)
+	}
+	code, response, stderr = run("session", "show", "--limit", "2", "--before", "2", id)
+	if code != 0 || !strings.Contains(response, "Avoid changing public API") ||
+		strings.Contains(response, "Run CI") {
+		t.Fatalf("older CLI page: code=%d out=%q err=%q", code, response, stderr)
 	}
 	code, response, stderr = run("session", "list")
 	if code != 0 || !strings.Contains(response, id) {
