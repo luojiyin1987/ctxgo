@@ -11,7 +11,7 @@ func sessionUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  ctxgo session start TASK...")
 	fmt.Fprintln(w, "  ctxgo session add [--kind decision|constraint|progress|result|next] SESSION_ID MESSAGE...")
-	fmt.Fprintln(w, "  ctxgo session show [--limit N] SESSION_ID")
+	fmt.Fprintln(w, "  ctxgo session show [--limit N] [--before EVENT_ID] SESSION_ID")
 	fmt.Fprintln(w, "  ctxgo session list [--limit N]")
 	fmt.Fprintln(w, "  ctxgo session close SESSION_ID")
 }
@@ -72,11 +72,12 @@ func runSessionCLI(root string, args []string, out, errOut io.Writer) int {
 		flags := flag.NewFlagSet("session show", flag.ContinueOnError)
 		flags.SetOutput(errOut)
 		limit := flags.Int("limit", 30, "maximum number of most recent events (1-100)")
+		before := flags.Int64("before", 0, "exclusive event ID cursor (0 means newest)")
 		if err := flags.Parse(args[1:]); err != nil {
 			return 2
 		}
 		if len(flags.Args()) != 1 || *limit < 1 || *limit > maxSessionResults ||
-			!validID.MatchString(flags.Arg(0)) {
+			*before < 0 || !validID.MatchString(flags.Arg(0)) {
 			fmt.Fprintln(errOut, "session show requires one session ID and limit between 1 and 100")
 			return 2
 		}
@@ -86,7 +87,7 @@ func runSessionCLI(root string, args []string, out, errOut io.Writer) int {
 			return 1
 		}
 		defer db.Close()
-		snapshot, err := loadSession(db, flags.Arg(0), *limit)
+		snapshot, err := loadSessionBefore(db, flags.Arg(0), *limit, *before)
 		if err != nil {
 			fmt.Fprintln(errOut, err)
 			return 1
@@ -97,8 +98,9 @@ func runSessionCLI(root string, args []string, out, errOut io.Writer) int {
 			fmt.Fprintf(out, "closed_at: %s\n", snapshot.Session.ClosedAt.String)
 		}
 		fmt.Fprintf(out, "events: %d of %d\n", len(snapshot.Events), snapshot.TotalEvents)
-		if snapshot.TotalEvents > int64(len(snapshot.Events)) {
-			fmt.Fprintf(out, "older events omitted; increase --limit (max %d)\n", maxSessionResults)
+		if snapshot.More && len(snapshot.Events) > 0 {
+			fmt.Fprintf(out, "older events omitted; page with: ctxgo session show --limit %d --before %d %s\n",
+				*limit, snapshot.Events[0].ID, snapshot.Session.ID)
 		}
 		for _, event := range snapshot.Events {
 			fmt.Fprintf(out, "  #%d %s [%s] %q\n", event.ID, event.CreatedAt, event.Kind, event.Text)
