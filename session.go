@@ -36,6 +36,7 @@ type sessionSnapshot struct {
 	Session sessionRecord
 	Events []sessionEvent
 	TotalEvents int64
+	More bool
 }
 
 func openSessionStore(root string) (*sql.DB, error) {
@@ -149,9 +150,18 @@ func closeSession(db *sql.DB, id string) error {
 // loadSession returns the latest events in chronological order and reports
 // the total count so older omitted decisions cannot be silently forgotten.
 func loadSession(db *sql.DB, id string, limit int) (sessionSnapshot, error) {
+	return loadSessionBefore(db, id, limit, 0)
+}
+
+// loadSessionBefore paginates older events by their stable event ID.
+// A zero cursor retrieves the latest events.
+func loadSessionBefore(db *sql.DB, id string, limit int, before int64) (sessionSnapshot, error) {
 	var snapshot sessionSnapshot
 	if !validID.MatchString(id) {
 		return snapshot, errors.New("invalid session ID")
+	}
+	if before < 0 {
+		return snapshot, errors.New("before cursor must be nonnegative")
 	}
 	if limit < 1 || limit > maxSessionResults {
 		return snapshot, fmt.Errorf("limit must be 1-%d", maxSessionResults)
@@ -167,7 +177,7 @@ func loadSession(db *sql.DB, id string, limit int) (sessionSnapshot, error) {
 		return snapshot, err
 	}
 	rows, err := db.Query(`SELECT id,kind,text,created_at FROM session_events
-		WHERE session_id=? ORDER BY id DESC LIMIT ?`, id, limit)
+		WHERE session_id=? AND (?=0 OR id < ?) ORDER BY id DESC LIMIT ?`, id, before, before, limit+1)
 	if err != nil {
 		return snapshot, err
 	}
@@ -181,6 +191,10 @@ func loadSession(db *sql.DB, id string, limit int) (sessionSnapshot, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return snapshot, err
+	}
+	if len(snapshot.Events) > limit {
+		snapshot.More = true
+		snapshot.Events = snapshot.Events[:limit]
 	}
 	for i, j := 0, len(snapshot.Events)-1; i < j; i, j = i+1, j-1 {
 		snapshot.Events[i], snapshot.Events[j] = snapshot.Events[j], snapshot.Events[i]
