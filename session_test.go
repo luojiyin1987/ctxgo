@@ -97,7 +97,7 @@ func TestSessionRejectsInvalidInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, candidate := range []struct {
-		id string
+		id   string
 		kind string
 		text string
 	}{
