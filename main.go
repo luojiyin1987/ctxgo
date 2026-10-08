@@ -222,7 +222,7 @@ func recall(root, id, stream string, out io.Writer) error {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "Usage:\n  ctxgo run [--timeout DURATION] [--summary-lines N] -- COMMAND [ARGS...]\n  ctxgo summary [--lines N] RUN_ID\n  ctxgo recall [--stream stdout|stderr|both] RUN_ID\n\nStored runs use CTXGO_DATA_DIR or the OS user cache directory.")
+	fmt.Fprintln(w, "Usage:\n  ctxgo run [--timeout DURATION] [--summary-lines N] -- COMMAND [ARGS...]\n  ctxgo summary [--lines N] RUN_ID\n  ctxgo index RUN_ID\n  ctxgo search [--limit N] QUERY\n  ctxgo recall [--stream stdout|stderr|both] RUN_ID\n\nStored runs use CTXGO_DATA_DIR or the OS user cache directory.")
 }
 
 func runCLI(args []string, out, errOut io.Writer) int {
@@ -289,6 +289,55 @@ func runCLI(args []string, out, errOut io.Writer) int {
 		if err := summarizeRun(root, flags.Arg(0), *lines, out); err != nil {
 			fmt.Fprintln(errOut, err)
 			return 1
+		}
+		return 0
+	case "index":
+		if len(args) != 2 {
+			fmt.Fprintln(errOut, "index requires exactly one run ID")
+			return 2
+		}
+		db, err := openIndex(root)
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		defer db.Close()
+		count, err := indexRun(db, root, args[1])
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		fmt.Fprintf(out, "indexed: %s\nlines: %d\n", args[1], count)
+		return 0
+	case "search":
+		flags := flag.NewFlagSet("search", flag.ContinueOnError)
+		flags.SetOutput(errOut)
+		limit := flags.Int("limit", 20, "maximum number of hits (1-100)")
+		if err := flags.Parse(args[1:]); err != nil {
+			return 2
+		}
+		if len(flags.Args()) == 0 {
+			fmt.Fprintln(errOut, "search requires a query")
+			return 2
+		}
+		query := strings.Join(flags.Args(), " ")
+		if _, err := ftsQuery(query); err != nil || *limit < 1 || *limit > maxSearchLimit {
+			fmt.Fprintln(errOut, "invalid search query or limit (1-100)")
+			return 2
+		}
+		db, err := openIndex(root)
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		defer db.Close()
+		hits, err := searchIndex(db, query, *limit)
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		for _, hit := range hits {
+			fmt.Fprintf(out, "%s %s:%d %s\n", hit.RunID, hit.Stream, hit.Line, hit.Text)
 		}
 		return 0
 	case "recall":
