@@ -99,33 +99,31 @@ func execute(ctx context.Context, root string, argv []string) (rec runRecord, er
 	}
 
 	done := make(chan struct{})
+	monitorDone := make(chan struct{})
+	var cancellationErr error
 	go func() {
+		defer close(monitorDone)
 		select {
 		case <-ctx.Done():
+			// The child might have completed while cancellation was queued.
+			select {
+			case <-done:
+				return
+			default:
+			}
+			cancellationErr = ctx.Err()
 			killProcessGroup(cmd)
 		case <-done:
 		}
 	}()
 	waitErr := cmd.Wait()
 	close(done)
+	<-monitorDone
 	rec.FinishedAt = time.Now().UTC()
 
-	switch {
-	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		rec.ExitCode = 124
-	case errors.Is(ctx.Err(), context.Canceled):
-		rec.ExitCode = 130
-	case waitErr == nil:
-		rec.ExitCode = 0
-	default:
-		var exitErr *exec.ExitError
-		if !errors.As(waitErr, &exitErr) {
-			return rec, waitErr
-		}
-		rec.ExitCode = exitErr.ExitCode()
-		if rec.ExitCode < 0 {
-			rec.ExitCode = 128 + signalNumber(exitErr)
-		}
+	rec.ExitCode, err = exitCodeFromWait(waitErr, cancellationErr)
+	if err != nil {
+		return rec, err
 	}
 	if err := stdout.Sync(); err != nil {
 		return rec, err
@@ -155,6 +153,29 @@ func execute(ctx context.Context, root string, argv []string) (rec runRecord, er
 	}
 	complete = true
 	return rec, nil
+}
+
+// exitCodeFromWait preserves a finished child's status even if context cancellation
+// raced with Wait. A timeout/interruption is reported only for signal exits.
+func exitCodeFromWait(waitErr, cancellationErr error) (int, error) {
+	if waitErr == nil {
+		return 0, nil
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(waitErr, &exitErr) {
+		return 0, waitErr
+	}
+	if exitErr.ExitCode() >= 0 {
+		return exitErr.ExitCode(), nil
+	}
+	switch {
+	case errors.Is(cancellationErr, context.DeadlineExceeded):
+		return 124, nil
+	case errors.Is(cancellationErr, context.Canceled):
+		return 130, nil
+	default:
+		return 128 + signalNumber(exitErr), nil
+	}
 }
 
 func recall(root, id, stream string, out io.Writer) error {
