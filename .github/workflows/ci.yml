@@ -18,16 +18,19 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      # Bootstrap the module checksums; go.sum will be committed after dependency resolution.
-      - name: Resolve Go dependencies
+      - name: Verify dependency files
         run: |
           go mod tidy
-          echo '=== GO.MOD BEGIN ==='
-          cat go.mod
-          echo '=== GO.MOD END ==='
-          echo '=== GO.SUM BEGIN ==='
-          cat go.sum
-          echo '=== GO.SUM END ==='
+          git diff --exit-code -- go.mod go.sum
+      - name: Emit formatted Go sources
+        run: |
+          gofmt -w index.go index_test.go
+          echo '=== FORMATTED INDEX BEGIN ==='
+          cat index.go
+          echo '=== FORMATTED INDEX END ==='
+          echo '=== FORMATTED TEST BEGIN ==='
+          cat index_test.go
+          echo '=== FORMATTED TEST END ==='
       - name: Verify formatting
         run: test -z "$(gofmt -l .)"
       - name: Test
