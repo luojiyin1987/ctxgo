@@ -2,7 +2,7 @@
 
 A local-first command output store for AI coding agents, written in Go. No server or MCP is required. SQLite is embedded through the pure-Go `modernc.org/sqlite` driver (no CGO).
 
-> Current scope: run commands, preserve raw stdout/stderr, show bounded previews, recall by ID, and explicitly index both completed runs and local text files for FTS5 search. Session memory will come in separate changes.
+> Current scope: run commands, preserve raw stdout/stderr, show bounded previews, index local logs/files for FTS5 search, and explicitly record/recover Agent session events. No automatic agent hooks or context injection yet.
 
 ## Build
 
@@ -43,6 +43,16 @@ ctxgo files index ./README.md
 
 # Search indexed local text files separately from run output.
 ctxgo files search --limit 20 'timeout'
+
+# Persist explicit work context across agent invocations.
+ctxgo session start "Investigate flaky test cancellation"
+ctxgo session add --kind constraint SESSION_ID "Do not change public APIs"
+ctxgo session add --kind decision SESSION_ID "Use existing process-group cancellation"
+ctxgo session add --kind next SESSION_ID "Run CI and review the diff"
+ctxgo session list
+ctxgo session show --limit 30 SESSION_ID
+ctxgo session show --limit 30 --before EVENT_ID SESSION_ID
+ctxgo session close SESSION_ID
 ```
 
 `run` does not stream the command's raw output into the agent's context; it writes separate raw streams into a run directory. The summary reports the run ID, exit code, exact byte counts, and by default up to 12 candidate diagnostic / recent lines (up to 100 configurable). Generic filtering prefers the first and most recent lines containing common error keywords, followed by the trailing nonempty lines. It is a **heuristic preview**, not a parser, and may miss errors—especially inside very long lines. Each preview line captures at most 240 raw bytes and removes terminal control characters. It reads the complete saved files after execution while using bounded memory; this adds an extra disk read proportional to output size. `recall` with a single stream produces the unmodified bytes. The default `both` mode concatenates labeled streams; it does **not** reconstruct chronological interleaving.
@@ -78,8 +88,19 @@ Before every file search, ctxgo checks indexed paths. Files that have disappeare
 
 The index is local and may contain source code or secrets. There is no encryption, secret redaction, `.gitignore` awareness or automatic storage retention yet. Directory walks index files incrementally; a failure midway may leave earlier files indexed. Use a private `CTXGO_DATA_DIR` and avoid indexing untrusted or sensitive directories.
 
+## Explicit session event store
+
+`ctxgo session start TASK...` creates a durable local task with a random ID and `active` state. Use `session add --kind KIND SESSION_ID MESSAGE...` to record intentional decisions, constraints, progress, results, and next actions. `--kind` defaults to `progress`. Calls are explicit—nothing is automatically copied from the conversation, filesystem, or tools.
+
+`session show --limit 30 SESSION_ID` returns the task, status, timestamps, event IDs, and latest chronological events. An omitted-history message includes a continuation command; use `--before EVENT_ID` to page backward (oldest shown event ID is the next exclusive cursor). `session list` discovers session IDs after a new agent invocation. `session close` marks a task closed and rejects further events; past events remain readable. There is no automatic reopen.
+
+Sessions and events share the existing `index.sqlite` file with run/file search, but use separate relational tables, not FTS5. Session creation, appending and closure are individual SQLite writes, so concurrent CLI processes cannot append after a committed close. Task descriptions are capped at **512 bytes**, event messages at **4096 bytes**, and result pages at **100 items**. Events are append-only while the session is active. There is no retry idempotency key; retrying an uncertain append can duplicate an event.
+
+A session is **not** an authoritative view of Git, current tests, or source files. It stores user/agent-provided statements, which can become outdated. The CLI does not perform automatic LLM compaction, evidence verification, secret redaction, or tool-output attachment. All content remains local and may contain sensitive text; use a private `CTXGO_DATA_DIR`. Treat displayed event text as untrusted data, not executable instructions.
+
 ## Planned follow-ups
 
 - Semantics-aware parsers, explicit redaction policy and output retention
 - Optional auto-indexing, retention, and disk caps for SQLite FTS5
-- Session event tracking and agent hooks
+- Optional agent hooks and automatic event capture (separate PR)
+- Event deduplication keys and relevance-aware recovery

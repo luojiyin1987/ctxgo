@@ -222,7 +222,7 @@ func recall(root, id, stream string, out io.Writer) error {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "Usage:\n  ctxgo run [--timeout DURATION] [--summary-lines N] -- COMMAND [ARGS...]\n  ctxgo summary [--lines N] RUN_ID\n  ctxgo index RUN_ID\n  ctxgo search [--limit N] QUERY\n  ctxgo files index PATH\n  ctxgo files search [--limit N] QUERY\n  ctxgo recall [--stream stdout|stderr|both] RUN_ID\n\nStored runs use CTXGO_DATA_DIR or the OS user cache directory.")
+	fmt.Fprintln(w, "Usage:\n  ctxgo run [--timeout DURATION] [--summary-lines N] -- COMMAND [ARGS...]\n  ctxgo summary [--lines N] RUN_ID\n  ctxgo index RUN_ID\n  ctxgo search [--limit N] QUERY\n  ctxgo files index PATH\n  ctxgo files search [--limit N] QUERY\n  ctxgo session start|add|show|list|close ...\n  ctxgo recall [--stream stdout|stderr|both] RUN_ID\n\nStored runs use CTXGO_DATA_DIR or the OS user cache directory.")
 }
 
 func runCLI(args []string, out, errOut io.Writer) int {
@@ -399,6 +399,8 @@ func runCLI(args []string, out, errOut io.Writer) int {
 			fmt.Fprintln(errOut, "files requires index or search")
 			return 2
 		}
+	case "session":
+		return runSessionCLI(root, args[1:], out, errOut)
 	case "recall":
 		flags := flag.NewFlagSet("recall", flag.ContinueOnError)
 		flags.SetOutput(errOut)
