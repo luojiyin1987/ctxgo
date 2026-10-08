@@ -161,13 +161,20 @@ func indexFile(db *sql.DB, path string) (count int64, err error) {
 		return 0, err
 	}
 	defer file.Close()
-	var head [4096]byte
-	n, err := file.Read(head[:])
-	if err != nil && !errors.Is(err, io.EOF) {
-		return 0, err
-	}
-	if bytes.IndexByte(head[:n], 0) >= 0 {
-		return 0, errBinaryFile
+	// Examine the entire file: a binary NUL may appear after the first
+	// indexed line prefix (4096 bytes). The file is at most 1 MiB.
+	var chunk [32 * 1024]byte
+	for {
+		n, readErr := file.Read(chunk[:])
+		if bytes.IndexByte(chunk[:n], 0) >= 0 {
+			return 0, errBinaryFile
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return 0, readErr
+		}
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return 0, err
