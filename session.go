@@ -12,31 +12,31 @@ import (
 )
 
 const (
-	maxSessionTaskBytes = 512
+	maxSessionTaskBytes  = 512
 	maxSessionEventBytes = 4096
-	maxSessionResults = 100
+	maxSessionResults    = 100
 )
 
 type sessionRecord struct {
-	ID string
-	Task string
-	Status string
+	ID        string
+	Task      string
+	Status    string
 	CreatedAt string
-	ClosedAt sql.NullString
+	ClosedAt  sql.NullString
 }
 
 type sessionEvent struct {
-	ID int64
-	Kind string
-	Text string
+	ID        int64
+	Kind      string
+	Text      string
 	CreatedAt string
 }
 
 type sessionSnapshot struct {
-	Session sessionRecord
-	Events []sessionEvent
+	Session     sessionRecord
+	Events      []sessionEvent
 	TotalEvents int64
-	More bool
+	More        bool
 }
 
 func openSessionStore(root string) (*sql.DB, error) {
