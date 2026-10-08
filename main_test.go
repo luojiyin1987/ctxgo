@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -71,9 +72,17 @@ func TestFinishedProcessKeepsExitStatus(t *testing.T) {
 }
 
 func TestExternallySignaledProcessKeepsSignalStatus(t *testing.T) {
-	argv := shell(t, "kill -TERM $")
-	err := exec.Command(argv[0], argv[1:]...).Run()
-	code, statusErr := exitCodeFromWait(err, nil)
+	if runtime.GOOS == "windows" {
+		t.Skip("requires POSIX signals")
+	}
+	cmd := exec.Command("sleep", "10")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	code, statusErr := exitCodeFromWait(cmd.Wait(), nil)
 	if statusErr != nil || code != 143 {
 		t.Fatalf("code=%d, err=%v", code, statusErr)
 	}
