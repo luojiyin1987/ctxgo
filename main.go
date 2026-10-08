@@ -222,7 +222,7 @@ func recall(root, id, stream string, out io.Writer) error {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "Usage:\n  ctxgo run [--timeout DURATION] [--summary-lines N] -- COMMAND [ARGS...]\n  ctxgo summary [--lines N] RUN_ID\n  ctxgo index RUN_ID\n  ctxgo search [--limit N] QUERY\n  ctxgo recall [--stream stdout|stderr|both] RUN_ID\n\nStored runs use CTXGO_DATA_DIR or the OS user cache directory.")
+	fmt.Fprintln(w, "Usage:\n  ctxgo run [--timeout DURATION] [--summary-lines N] -- COMMAND [ARGS...]\n  ctxgo summary [--lines N] RUN_ID\n  ctxgo index RUN_ID\n  ctxgo search [--limit N] QUERY\n  ctxgo files index PATH\n  ctxgo files search [--limit N] QUERY\n  ctxgo recall [--stream stdout|stderr|both] RUN_ID\n\nStored runs use CTXGO_DATA_DIR or the OS user cache directory.")
 }
 
 func runCLI(args []string, out, errOut io.Writer) int {
@@ -340,6 +340,65 @@ func runCLI(args []string, out, errOut io.Writer) int {
 			fmt.Fprintf(out, "%s %s:%d %s\n", hit.RunID, hit.Stream, hit.Line, hit.Text)
 		}
 		return 0
+	case "files":
+		if len(args) < 2 {
+			fmt.Fprintln(errOut, "files requires index or search")
+			return 2
+		}
+		switch args[1] {
+		case "index":
+			if len(args) != 3 {
+				fmt.Fprintln(errOut, "files index requires one path")
+				return 2
+			}
+			db, err := openFileIndex(root)
+			if err != nil {
+				fmt.Fprintln(errOut, err)
+				return 1
+			}
+			defer db.Close()
+			files, lines, err := indexPath(db, args[2])
+			if err != nil {
+				fmt.Fprintln(errOut, err)
+				return 1
+			}
+			fmt.Fprintf(out, "files: %d\nlines: %d\n", files, lines)
+			return 0
+		case "search":
+			flags := flag.NewFlagSet("files search", flag.ContinueOnError)
+			flags.SetOutput(errOut)
+			limit := flags.Int("limit", 20, "maximum number of hits (1-100)")
+			if err := flags.Parse(args[2:]); err != nil {
+				return 2
+			}
+			if len(flags.Args()) == 0 || *limit < 1 || *limit > maxSearchLimit {
+				fmt.Fprintln(errOut, "files search requires query and limit between 1 and 100")
+				return 2
+			}
+			query := strings.Join(flags.Args(), " ")
+			if _, err := ftsQuery(query); err != nil {
+				fmt.Fprintln(errOut, err)
+				return 2
+			}
+			db, err := openFileIndex(root)
+			if err != nil {
+				fmt.Fprintln(errOut, err)
+				return 1
+			}
+			defer db.Close()
+			hits, err := searchFiles(db, query, *limit)
+			if err != nil {
+				fmt.Fprintln(errOut, err)
+				return 1
+			}
+			for _, hit := range hits {
+				fmt.Fprintf(out, "%q:%d %s\n", hit.Path, hit.Line, hit.Text)
+			}
+			return 0
+		default:
+			fmt.Fprintln(errOut, "files requires index or search")
+			return 2
+		}
 	case "recall":
 		flags := flag.NewFlagSet("recall", flag.ContinueOnError)
 		flags.SetOutput(errOut)
