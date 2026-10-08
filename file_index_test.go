@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -99,8 +100,10 @@ func TestFilesRejectBinarySymlinkAndOversize(t *testing.T) {
 	defer db.Close()
 	dir := t.TempDir()
 	for name, content := range map[string]string{
-		"binary.txt": "abc\x00def",
-		"huge.txt":   strings.Repeat("x", maxIndexedFileBytes+1),
+		"binary.txt":       "abc\x00def",
+		"binary-late.txt":  strings.Repeat("x", indexLineBytes) + "\x00trailing",
+		"binary-chunk.txt": strings.Repeat("y", 32*1024) + "\x00trailing",
+		"huge.txt":         strings.Repeat("x", maxIndexedFileBytes+1),
 	} {
 		path := writeFixture(t, filepath.Join(dir, name), content)
 		if _, _, err := indexPath(db, path); err == nil {
@@ -119,6 +122,28 @@ func TestFilesRejectBinarySymlinkAndOversize(t *testing.T) {
 		if files, _, err := indexPath(db, dir); err != nil || files != 1 {
 			t.Fatalf("directory symlink skip: files=%d err=%v", files, err)
 		}
+	}
+}
+
+// A late NUL must be rejected before the reindex transaction can erase
+// the previously committed document, even though the file became stale.
+func TestLateBinaryReindexPreservesPreviousIndex(t *testing.T) {
+	db, err := openFileIndex(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	path := writeFixture(t, filepath.Join(t.TempDir(), "notes.txt"), "textonlyterm\n")
+	if _, err := indexFile(db, path); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, path, strings.Repeat("x", indexLineBytes)+"\x00")
+	if _, err := indexFile(db, path); !errors.Is(err, errBinaryFile) {
+		t.Fatalf("expected binary rejection, got %v", err)
+	}
+	var retained int
+	if err := db.QueryRow("SELECT count(*) FROM file_lines WHERE content = ?", "textonlyterm").Scan(&retained); err != nil || retained != 1 {
+		t.Fatalf("previous committed index was lost: rows=%d err=%v", retained, err)
 	}
 }
 
