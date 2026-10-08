@@ -32,7 +32,9 @@ func TestFilesIndexAndSearch(t *testing.T) {
 	writeFixture(t, filepath.Join(project, "binary.dat"), "uncommonkeyword\n")
 	writeFixture(t, filepath.Join(project, "large.go"), strings.Repeat("x", maxIndexedFileBytes+1))
 	db, err := openFileIndex(root)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer db.Close()
 	for attempt := 0; attempt < 2; attempt++ {
 		files, lines, err := indexPath(db, project)
@@ -56,31 +58,49 @@ func TestFilesIndexAndSearch(t *testing.T) {
 
 func TestFilesChangedAndDeletedInvalidate(t *testing.T) {
 	db, err := openFileIndex(t.TempDir())
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer db.Close()
 	source := writeFixture(t, filepath.Join(t.TempDir(), "notes.md"), "stalephrase old\n")
-	if _, _, err := indexPath(db, source); err != nil { t.Fatal(err) }
+	if _, _, err := indexPath(db, source); err != nil {
+		t.Fatal(err)
+	}
 	writeFixture(t, source, "freshphrase updated document\n")
 	old, err := searchFiles(db, "stalephrase", 20)
-	if err != nil || len(old) != 0 { t.Fatalf("stale results: %v %v", old, err) }
+	if err != nil || len(old) != 0 {
+		t.Fatalf("stale results: %v %v", old, err)
+	}
 	newHits, err := searchFiles(db, "freshphrase", 20)
-	if err != nil || len(newHits) != 0 { t.Fatalf("unindexed content visible: %v %v", newHits, err) }
-	if _, _, err := indexPath(db, source); err != nil { t.Fatal(err) }
+	if err != nil || len(newHits) != 0 {
+		t.Fatalf("unindexed content visible: %v %v", newHits, err)
+	}
+	if _, _, err := indexPath(db, source); err != nil {
+		t.Fatal(err)
+	}
 	newHits, err = searchFiles(db, "freshphrase", 20)
-	if err != nil || len(newHits) != 1 { t.Fatalf("reindex: %v %v", newHits, err) }
-	if err := os.Remove(source); err != nil { t.Fatal(err) }
+	if err != nil || len(newHits) != 1 {
+		t.Fatalf("reindex: %v %v", newHits, err)
+	}
+	if err := os.Remove(source); err != nil {
+		t.Fatal(err)
+	}
 	newHits, err = searchFiles(db, "freshphrase", 20)
-	if err != nil || len(newHits) != 0 { t.Fatalf("deleted file still indexed: %v %v", newHits, err) }
+	if err != nil || len(newHits) != 0 {
+		t.Fatalf("deleted file still indexed: %v %v", newHits, err)
+	}
 }
 
 func TestFilesRejectBinarySymlinkAndOversize(t *testing.T) {
 	db, err := openFileIndex(t.TempDir())
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer db.Close()
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"binary.txt": "abc\x00def",
-		"huge.txt": strings.Repeat("x", maxIndexedFileBytes+1),
+		"huge.txt":   strings.Repeat("x", maxIndexedFileBytes+1),
 	} {
 		path := writeFixture(t, filepath.Join(dir, name), content)
 		if _, _, err := indexPath(db, path); err == nil {
@@ -90,8 +110,12 @@ func TestFilesRejectBinarySymlinkAndOversize(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		path := writeFixture(t, filepath.Join(dir, "target.go"), "secretword\n")
 		link := filepath.Join(dir, "alias.go")
-		if err := os.Symlink(path, link); err != nil { t.Fatal(err) }
-		if _, _, err := indexPath(db, link); err == nil { t.Fatal("followed explicit symlink") }
+		if err := os.Symlink(path, link); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := indexPath(db, link); err == nil {
+			t.Fatal("followed explicit symlink")
+		}
 		if files, _, err := indexPath(db, dir); err != nil || files != 1 {
 			t.Fatalf("directory symlink skip: files=%d err=%v", files, err)
 		}
@@ -101,19 +125,33 @@ func TestFilesRejectBinarySymlinkAndOversize(t *testing.T) {
 func TestFilesCoexistWithRunSearch(t *testing.T) {
 	root := t.TempDir()
 	rec, err := execute(context.Background(), root, shell(t, "echo 'runneronlyterm'"))
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	db, err := openFileIndex(root)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer db.Close()
-	if _, err := indexRun(db, root, rec.ID); err != nil { t.Fatal(err) }
+	if _, err := indexRun(db, root, rec.ID); err != nil {
+		t.Fatal(err)
+	}
 	file := writeFixture(t, filepath.Join(t.TempDir(), "code.go"), "// fileonlyterm\n")
-	if _, _, err := indexPath(db, file); err != nil { t.Fatal(err) }
+	if _, _, err := indexPath(db, file); err != nil {
+		t.Fatal(err)
+	}
 	runHits, err := searchIndex(db, "runneronlyterm", 10)
-	if err != nil || len(runHits) != 1 { t.Fatalf("run search: %v %v", runHits, err) }
+	if err != nil || len(runHits) != 1 {
+		t.Fatalf("run search: %v %v", runHits, err)
+	}
 	fileHits, err := searchFiles(db, "fileonlyterm", 10)
-	if err != nil || len(fileHits) != 1 { t.Fatalf("file search: %v %v", fileHits, err) }
+	if err != nil || len(fileHits) != 1 {
+		t.Fatalf("file search: %v %v", fileHits, err)
+	}
 	fileHits, err = searchFiles(db, "runneronlyterm", 10)
-	if err != nil || len(fileHits) != 0 { t.Fatalf("search polluted by runs: %v %v", fileHits, err) }
+	if err != nil || len(fileHits) != 0 {
+		t.Fatalf("search polluted by runs: %v %v", fileHits, err)
+	}
 }
 
 func TestFilesCLI(t *testing.T) {
