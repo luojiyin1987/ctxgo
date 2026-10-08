@@ -22,15 +22,6 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code -- go.mod go.sum
-      - name: Print formatted file sources (bootstrap only)
-        run: |
-          gofmt -w file_index.go file_index_test.go
-          echo '=== FORMATTED FILE INDEX BEGIN ==='
-          cat file_index.go
-          echo '=== FORMATTED FILE INDEX END ==='
-          echo '=== FORMATTED FILE TEST BEGIN ==='
-          cat file_index_test.go
-          echo '=== FORMATTED FILE TEST END ==='
       - name: Verify formatting
         run: test -z "$(gofmt -l .)"
       - name: Test
