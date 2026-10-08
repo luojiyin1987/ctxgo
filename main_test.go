@@ -59,6 +59,26 @@ func TestRunCLIExitCode(t *testing.T) {
 	}
 }
 
+func TestFinishedProcessKeepsExitStatus(t *testing.T) {
+	argv := shell(t, "exit 23")
+	err := exec.Command(argv[0], argv[1:]...).Run()
+	for _, cancellation := range []error{context.Canceled, context.DeadlineExceeded} {
+		code, statusErr := exitCodeFromWait(err, cancellation)
+		if statusErr != nil || code != 23 {
+			t.Fatalf("code=%d, err=%v, cancellation=%v", code, statusErr, cancellation)
+		}
+	}
+}
+
+func TestExternallySignaledProcessKeepsSignalStatus(t *testing.T) {
+	argv := shell(t, "kill -TERM $")
+	err := exec.Command(argv[0], argv[1:]...).Run()
+	code, statusErr := exitCodeFromWait(err, nil)
+	if statusErr != nil || code != 143 {
+		t.Fatalf("code=%d, err=%v", code, statusErr)
+	}
+}
+
 func TestTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
 	defer cancel()
