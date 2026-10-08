@@ -222,7 +222,7 @@ func recall(root, id, stream string, out io.Writer) error {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "Usage:\n  ctxgo run [--timeout DURATION] -- COMMAND [ARGS...]\n  ctxgo recall [--stream stdout|stderr|both] RUN_ID\n\nStored runs use CTXGO_DATA_DIR or the OS user cache directory.")
+	fmt.Fprintln(w, "Usage:\n  ctxgo run [--timeout DURATION] [--summary-lines N] -- COMMAND [ARGS...]\n  ctxgo summary [--lines N] RUN_ID\n  ctxgo recall [--stream stdout|stderr|both] RUN_ID\n\nStored runs use CTXGO_DATA_DIR or the OS user cache directory.")
 }
 
 func runCLI(args []string, out, errOut io.Writer) int {
@@ -240,11 +240,12 @@ func runCLI(args []string, out, errOut io.Writer) int {
 		flags := flag.NewFlagSet("run", flag.ContinueOnError)
 		flags.SetOutput(errOut)
 		timeout := flags.Duration("timeout", 0, "maximum command execution time (0 means no timeout)")
+		lines := flags.Int("summary-lines", defaultSummaryLines, "maximum number of filtered output lines (0 disables summary)")
 		if err := flags.Parse(args[1:]); err != nil {
 			return 2
 		}
-		if *timeout < 0 || len(flags.Args()) == 0 {
-			fmt.Fprintln(errOut, "run requires a command and a nonnegative timeout")
+		if *timeout < 0 || *lines < 0 || *lines > maxSummaryLines || len(flags.Args()) == 0 {
+			fmt.Fprintln(errOut, "run requires a command, nonnegative timeout, and summary-lines between 0 and 100")
 			return 2
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -265,7 +266,31 @@ func runCLI(args []string, out, errOut io.Writer) int {
 		}
 		fmt.Fprintf(out, "run_id: %s\nexit_code: %d\nstdout_bytes: %d\nstderr_bytes: %d\n", rec.ID, rec.ExitCode, rec.StdoutBytes, rec.StderrBytes)
 		fmt.Fprintf(out, "recall: ctxgo recall --stream stderr %s\n", rec.ID)
+		if *lines > 0 {
+			fmt.Fprintln(out, "summary (candidate diagnostics and recent lines):")
+			if summaryErr := summarizeRun(root, rec.ID, *lines, out); summaryErr != nil {
+				// Storage already succeeded; failure to display a preview must
+				// not overwrite the child process exit status.
+				fmt.Fprintf(errOut, "summary unavailable: %v\n", summaryErr)
+			}
+		}
 		return rec.ExitCode
+	case "summary":
+		flags := flag.NewFlagSet("summary", flag.ContinueOnError)
+		flags.SetOutput(errOut)
+		lines := flags.Int("lines", defaultSummaryLines, "maximum number of filtered lines")
+		if err := flags.Parse(args[1:]); err != nil {
+			return 2
+		}
+		if len(flags.Args()) != 1 || *lines < 0 || *lines > maxSummaryLines {
+			fmt.Fprintln(errOut, "summary requires one run ID and lines between 0 and 100")
+			return 2
+		}
+		if err := summarizeRun(root, flags.Arg(0), *lines, out); err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		return 0
 	case "recall":
 		flags := flag.NewFlagSet("recall", flag.ContinueOnError)
 		flags.SetOutput(errOut)
