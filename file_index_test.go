@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -125,7 +126,7 @@ func TestFilesCLI(t *testing.T) {
 	}
 	out.Reset()
 	errors.Reset()
-	if code := runCLI([]string{"files", "search", "cliuniquetoken"}, &out, &errors); code != 0 || !strings.Contains(out.String(), source+":1") {
+	if code := runCLI([]string{"files", "search", "cliuniquetoken"}, &out, &errors); code != 0 || !strings.Contains(out.String(), strconv.Quote(source)+":1") {
 		t.Fatalf("search CLI code=%d out=%q err=%q", code, out.String(), errors.String())
 	}
 	for _, args := range [][]string{
