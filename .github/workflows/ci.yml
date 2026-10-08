@@ -22,6 +22,18 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code -- go.mod go.sum
+      - name: Emit formatted session sources (bootstrap only)
+        run: |
+          gofmt -w session.go session_cli.go session_test.go
+          echo '=== SESSION SOURCE BEGIN ==='
+          cat session.go
+          echo '=== SESSION SOURCE END ==='
+          echo '=== SESSION CLI BEGIN ==='
+          cat session_cli.go
+          echo '=== SESSION CLI END ==='
+          echo '=== SESSION TEST BEGIN ==='
+          cat session_test.go
+          echo '=== SESSION TEST END ==='
       - name: Verify formatting
         run: test -z "$(gofmt -l .)"
       - name: Test
