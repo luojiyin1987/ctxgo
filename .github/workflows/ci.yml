@@ -22,6 +22,15 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code -- go.mod go.sum
+      - name: Format new Codex adapter for initial validation
+        run: |
+          gofmt -w codex.go codex_test.go
+          echo '=== CODEX GO BEGIN ==='
+          cat codex.go
+          echo '=== CODEX GO END ==='
+          echo '=== CODEX TEST BEGIN ==='
+          cat codex_test.go
+          echo '=== CODEX TEST END ==='
       - name: Verify formatting
         run: test -z "$(gofmt -l .)"
       - name: Test
