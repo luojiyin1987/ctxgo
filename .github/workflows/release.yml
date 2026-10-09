@@ -28,7 +28,7 @@ jobs:
       GH_REPO: ${{ github.repository }}
     steps:
       - name: Check out release tools
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: release-tools
           persist-credentials: false
@@ -39,13 +39,13 @@ jobs:
             exit 2
           fi
       - name: Check out tagged source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_TAG }}
           path: source
           persist-credentials: false
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: source/go.mod
       - name: Test tagged source
