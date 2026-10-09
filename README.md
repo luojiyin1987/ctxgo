@@ -173,6 +173,19 @@ Run `ctxgo session list` to discover recorded sessions. After reviewing a sessio
 
 This is a small native Codex hook adapter, **not** an MCP server, a Codex plugin or an LLM context compression guarantee. To disable it, remove only the ctxgo hook entries and review the change in Codex `/hooks`.
 
+### Live Codex check
+
+The live check uses `codex-fast` from the WSL login shell. It makes four model calls in a private temporary project. It tests startup, two resumes, Bash, `apply_patch`, and a database failure. It writes `summary.json` and hook timing records in the output directory. The script removes its temporary auth link after the check.
+
+Run it only when you want to spend model tokens:
+
+```bash
+python3 scripts/live_codex_hooks.py --run-live --model MODEL --max-model-calls 4 --timeout-seconds 120 --token-budget 150000
+```
+
+The token budget stops later calls when an earlier call uses too many tokens. A single call can exceed the remaining budget. CI runs `python3 scripts/smoke_live_codex_hooks.py` without model calls. CI does not run the live check.
+The script stops the Codex process group when a model call reaches its timeout.
+
 ## Other coding agents: CLI integration (no native Hooks yet)
 
 **Claude Code, OpenCode, and other agents are not automatically integrated by this project.** The [Codex Hooks JSON](examples/codex/hooks.json) uses Codex's event schema; do **not** copy it into another agent and expect its Hook callbacks or JSON to match. In particular, `ctxgo codex hook` is **not** a generic stdin protocol, MCP tool, or universal agent adapter.
@@ -201,19 +214,6 @@ ctxgo session show SESSION_ID
 ```
 
 Manual CLI integration **does not automatically capture another agent's tool calls or inject context on resume**. Native adapters for those agents require separate, agent-specific Hook/API implementations. Agents without a shell tool cannot use this CLI directly.
-
-### Live Codex check
-
-The live check uses `codex-fast` from the WSL login shell. It makes four model calls in a private temporary project. It tests startup, two resumes, Bash, `apply_patch`, and a database failure. It writes `summary.json` and hook timing records in the output directory. The script removes its temporary auth link after the check.
-
-Run it only when you want to spend model tokens:
-
-```bash
-python3 scripts/live_codex_hooks.py --run-live --model MODEL --max-model-calls 4 --timeout-seconds 120 --token-budget 150000
-```
-
-The token budget stops later calls when an earlier call uses too many tokens. A single call can exceed the remaining budget. CI runs `python3 scripts/smoke_live_codex_hooks.py` without model calls. CI does not run the live check.
-The script stops the Codex process group when a model call reaches its timeout.
 
 ## Planned follow-ups
 
