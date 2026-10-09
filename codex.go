@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const maxCodexHookBytes = 1 << 20
@@ -178,6 +179,20 @@ func recordCodexToolUse(db *sql.DB, codexID, sessionID string, event codexHookIn
 	return tx.Commit()
 }
 
+// codexExcerpt retains no more than 160 original bytes, but always ends
+// at a UTF-8 rune boundary so JSON context never loses a partial character.
+func codexExcerpt(content string) string {
+	const maxBytes = 160
+	if len(content) <= maxBytes {
+		return content
+	}
+	end := maxBytes
+	for end > 0 && !utf8.RuneStart(content[end]) {
+		end--
+	}
+	return content[:end] + " [excerpt]"
+}
+
 // codexContext is deliberately small and never treats previous notes as
 // authoritative. Other-workspace sessions are not eligible for recovery.
 func codexContext(db *sql.DB, id, codexID, workspace string) (string, error) {
@@ -197,9 +212,7 @@ func codexContext(db *sql.DB, id, codexID, workspace string) (string, error) {
 			rows.Close()
 			return "", err
 		}
-		if len(content) > 160 {
-			content = string([]byte(content)[:160]) + " [excerpt]"
-		}
+		content = codexExcerpt(content)
 		fmt.Fprintf(&b, "Historical %s: %q\n", kind, content)
 	}
 	readErr := rows.Err()
