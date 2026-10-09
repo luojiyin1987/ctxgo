@@ -222,7 +222,7 @@ func recall(root, id, stream string, out io.Writer) error {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "Usage:\n  ctxgo run [--timeout DURATION] [--summary-lines N] -- COMMAND [ARGS...]\n  ctxgo summary [--lines N] RUN_ID\n  ctxgo index RUN_ID\n  ctxgo search [--limit N] QUERY\n  ctxgo files index PATH\n  ctxgo files search [--limit N] QUERY\n  ctxgo session start|add|show|list|close ...\n  ctxgo recall [--stream stdout|stderr|both] RUN_ID\n\nStored runs use CTXGO_DATA_DIR or the OS user cache directory.")
+	fmt.Fprintln(w, "Usage:\n  ctxgo run [--timeout DURATION] [--summary-lines N] -- COMMAND [ARGS...]\n  ctxgo summary [--lines N] RUN_ID\n  ctxgo index RUN_ID\n  ctxgo search [--limit N] QUERY\n  ctxgo files index PATH\n  ctxgo files search [--limit N] QUERY\n  ctxgo session start|add|show|list|close ...\n  ctxgo codex hook  # reads lifecycle JSON from stdin (opt-in)\n  ctxgo recall [--stream stdout|stderr|both] RUN_ID\n\nStored runs use CTXGO_DATA_DIR or the OS user cache directory.")
 }
 
 func runCLI(args []string, out, errOut io.Writer) int {
@@ -401,6 +401,17 @@ func runCLI(args []string, out, errOut io.Writer) int {
 		}
 	case "session":
 		return runSessionCLI(root, args[1:], out, errOut)
+	case "codex":
+		if len(args) != 2 || args[1] != "hook" {
+			fmt.Fprintln(errOut, "codex requires hook (reads JSON on stdin)")
+			return 2
+		}
+		if err := handleCodexHook(root, os.Stdin, out); err != nil {
+			// Hooks are observability only: never block the agent's tool call
+			// or session start because local persistence is unavailable.
+			fmt.Fprintf(errOut, "ctxgo hook skipped: %v\n", err)
+		}
+		return 0
 	case "recall":
 		flags := flag.NewFlagSet("recall", flag.ContinueOnError)
 		flags.SetOutput(errOut)

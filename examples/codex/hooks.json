@@ -1,0 +1,30 @@
+{
+  "description": "Opt-in local ctxgo session notes for Codex (metadata-only).",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ctxgo codex hook",
+            "timeout": 5,
+            "additionalContextLimit": 500
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ctxgo codex hook",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
