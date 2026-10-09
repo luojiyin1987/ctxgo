@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -206,39 +207,60 @@ func codexContext(db *sql.DB, id, codexID, workspace string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	type note struct {
+		id        int64
+		kind      string
+		content   string
+		createdAt string
+	}
 	seen := make(map[string]bool)
-	shown := 0
+	notes := make([]note, 0, 30)
 	for rows.Next() {
-		var eventID int64
-		var kind, content, createdAt string
-		if err := rows.Scan(&eventID, &kind, &content, &createdAt); err != nil {
+		var item note
+		if err := rows.Scan(&item.id, &item.kind, &item.content, &item.createdAt); err != nil {
 			rows.Close()
 			return "", err
 		}
-		key := kind + "\x00" + content
+		key := item.kind + "\x00" + item.content
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		created, err := time.Parse(time.RFC3339Nano, createdAt)
-		if err != nil {
-			rows.Close()
-			return "", fmt.Errorf("invalid session event time for event %d: %w", eventID, err)
-		}
-		content = codexExcerpt(content)
-		fmt.Fprintf(&b, "Historical %s #%d at %s: %q\n", kind, eventID,
-			created.UTC().Format("2006-01-02 15:04:05 UTC"), content)
-		shown++
-		if shown == 3 {
-			break
-		}
+		notes = append(notes, item)
 	}
 	readErr := rows.Err()
 	rows.Close()
 	if readErr != nil {
 		return "", readErr
 	}
-	if shown > 0 {
+	selected := append([]note(nil), notes[:min(3, len(notes))]...)
+	hasConstraint := false
+	for _, item := range selected {
+		if item.kind == "constraint" {
+			hasConstraint = true
+			break
+		}
+	}
+	// Preserve one recent constraint when newer notes fill the context limit.
+	if !hasConstraint && len(selected) == 3 {
+		for _, item := range notes[3:] {
+			if item.kind == "constraint" {
+				selected[2] = item
+				break
+			}
+		}
+	}
+	sort.Slice(selected, func(i, j int) bool { return selected[i].id > selected[j].id })
+	for _, item := range selected {
+		created, err := time.Parse(time.RFC3339Nano, item.createdAt)
+		if err != nil {
+			return "", fmt.Errorf("invalid session event time for event %d: %w", item.id, err)
+		}
+		content := codexExcerpt(item.content)
+		fmt.Fprintf(&b, "Historical %s #%d at %s: %q\n", item.kind, item.id,
+			created.UTC().Format("2006-01-02 15:04:05 UTC"), content)
+	}
+	if len(selected) > 0 {
 		b.WriteString("Previous notes may be stale. Check current files and tool results.\n")
 	}
 	rows, err = db.Query(`SELECT session_id FROM codex_bindings

@@ -123,11 +123,44 @@ def calls_for(root, codex_id):
 
 def assert_hooks(root, codex_id, source, tools):
     calls = calls_for(root, codex_id)
-    require(sum(call.get("source") == source for call in calls) == 1,
-            f"expected one {source} SessionStart hook")
+    require(any(call.get("source") == source for call in calls),
+            f"missing {source} SessionStart hook")
     for name in tools:
-        require(sum(call.get("tool") == name for call in calls) == 1,
-                f"expected one {name} PostToolUse hook")
+        require(any(call.get("tool") == name for call in calls),
+                f"missing {name} PostToolUse hook")
+    return calls
+
+
+def assert_recorded_tool_calls(root, data, codex_id):
+    calls = [call for call in calls_for(root, codex_id)
+             if call.get("event") == "PostToolUse"]
+    require(calls, "no PostToolUse hooks ran")
+    require(all(call["exit_code"] == 0 and not call["stderr"] for call in calls),
+            "a PostToolUse hook failed")
+    by_id = {}
+    for call in calls:
+        tool_id = call.get("tool_use_id")
+        require(tool_id and call.get("tool") in ("Bash", "apply_patch"),
+                "PostToolUse hook has missing metadata")
+        require(tool_id not in by_id or by_id[tool_id] == call["tool"],
+                "one tool_use_id names two tools")
+        by_id[tool_id] = call["tool"]
+    db = sqlite3.connect(data / "index.sqlite")
+    stored_ids = [row[0] for row in db.execute(
+        "SELECT tool_use_id FROM codex_tool_uses WHERE codex_id=?", (codex_id,))]
+    messages = [row[0] for row in db.execute(
+        "SELECT text FROM session_events WHERE session_id="
+        "(SELECT session_id FROM codex_bindings WHERE codex_id=?) AND kind='progress'",
+        (codex_id,))]
+    db.close()
+    require(len(stored_ids) == len(by_id) and set(stored_ids) == set(by_id),
+            "SQLite tool IDs differ from observed Hook calls")
+    require(len(messages) == len(by_id), "SQLite contains duplicate tool events")
+    for message in messages:
+        match = re.fullmatch(r"Codex PostToolUse tool=(Bash|apply_patch) "
+                             r"tool_use_id=([A-Za-z0-9_-]+) turn=[A-Za-z0-9_-]+", message)
+        require(match and by_id.get(match.group(2)) == match.group(1),
+                "SQLite tool event differs from observed Hook call")
     return calls
 
 
@@ -163,7 +196,24 @@ def run_checks(root, args):
             "apply_patch did not run")
     require((project / "probe.txt").read_text() == "integration probe\n",
             "apply_patch wrote unexpected content")
-    assert_hooks(root, codex_id, "startup", ["Bash", "apply_patch"])
+    start_calls = assert_hooks(root, codex_id, "startup", ["Bash", "apply_patch"])
+    require(sum(call.get("tool") == "Bash" for call in start_calls) ==
+            len(tool_items(start, "command_execution")),
+            "Bash Hook count differs from completed tool calls")
+    require(sum(call.get("tool") == "apply_patch" for call in start_calls) ==
+            len(tool_items(start, "file_change")),
+            "apply_patch Hook count differs from completed tool calls")
+    observed = assert_recorded_tool_calls(root, data, codex_id)
+
+    first_tool = observed[0]
+    retry = {"session_id": codex_id, "cwd": str(project),
+             "hook_event_name": "PostToolUse", "tool_name": first_tool["tool"],
+             "tool_use_id": first_tool["tool_use_id"], "turn_id": "retry"}
+    replay = subprocess.run([str(root / "bin" / "ctxgo-real"), "codex", "hook"],
+                            input=json.dumps(retry), text=True, capture_output=True,
+                            env={**os.environ, "CTXGO_DATA_DIR": str(data)}, check=True)
+    require(not replay.stdout and not replay.stderr, "retry failed or changed output")
+    assert_recorded_tool_calls(root, data, codex_id)
 
     db = sqlite3.connect(data / "index.sqlite")
     local_id = db.execute("SELECT session_id FROM codex_bindings WHERE codex_id=?",

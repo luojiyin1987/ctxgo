@@ -147,6 +147,54 @@ func TestCodexContextShowsEventSourceAndDeduplicatesNotes(t *testing.T) {
 	}
 }
 
+func TestCodexContextKeepsOlderConstraintWithinCandidateLimit(t *testing.T) {
+	root, workspace := t.TempDir(), t.TempDir()
+	const codexID = "thr_constraint_priority"
+	start := codexPayload(codexID, workspace, "SessionStart", map[string]any{"source": "startup"})
+	if _, err := invokeHook(t, root, start); err != nil {
+		t.Fatal(err)
+	}
+	db, err := openCodexStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sessionID string
+	if err := db.QueryRow("SELECT session_id FROM codex_bindings WHERE codex_id=?", codexID).Scan(&sessionID); err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []struct {
+		kind string
+		text string
+	}{
+		{"constraint", "Keep the public API unchanged."},
+		{"decision", "Use the new test fixture."},
+		{"next", "Run tests."},
+		{"decision", "Review the diff."},
+	} {
+		if err := addSessionEvent(db, sessionID, event.kind, event.text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+	resume := codexPayload(codexID, workspace, "SessionStart", map[string]any{"source": "resume"})
+	raw, err := invokeHook(t, root, resume)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output codexHookOutput
+	if err := json.Unmarshal([]byte(raw), &output); err != nil {
+		t.Fatal(err)
+	}
+	context := output.HookSpecificOutput.AdditionalContext
+	if !strings.Contains(context, "Historical constraint #1") ||
+		!strings.Contains(context, "Keep the public API unchanged.") ||
+		!strings.Contains(context, "Review the diff.") ||
+		!strings.Contains(context, "Run tests.") ||
+		strings.Contains(context, "Use the new test fixture.") {
+		t.Fatalf("constraint selection is incorrect: %q", context)
+	}
+}
+
 func TestCodexRecordsMetadataOnlyAndDeduplicates(t *testing.T) {
 	root, workspace := t.TempDir(), t.TempDir()
 	payload := codexPayload("thr_metadata", workspace, "PostToolUse", map[string]any{

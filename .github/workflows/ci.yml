@@ -24,6 +24,10 @@ jobs:
           git diff --exit-code -- go.mod go.sum
       - name: Verify formatting
         run: test -z "$(gofmt -l .)"
+      - name: Verify Codex live harness gate
+        run: |
+          python3 -m py_compile scripts/*.py
+          python3 scripts/smoke_live_codex_hooks.py
       - name: Test
         run: go test -race ./...
       - name: Vet
