@@ -208,19 +208,26 @@ func codexContext(db *sql.DB, id, codexID, workspace string) (string, error) {
 		return "", err
 	}
 	type note struct {
-		id        int64
-		kind      string
-		content   string
-		createdAt string
+		id      int64
+		kind    string
+		content string
+		created time.Time
 	}
 	seen := make(map[string]bool)
 	notes := make([]note, 0, 30)
 	for rows.Next() {
 		var item note
-		if err := rows.Scan(&item.id, &item.kind, &item.content, &item.createdAt); err != nil {
+		var createdAt string
+		if err := rows.Scan(&item.id, &item.kind, &item.content, &createdAt); err != nil {
 			rows.Close()
 			return "", err
 		}
+		created, err := time.Parse(time.RFC3339Nano, createdAt)
+		if err != nil {
+			// Skip damaged rows so valid notes remain available for recovery.
+			continue
+		}
+		item.created = created.UTC()
 		key := item.kind + "\x00" + item.content
 		if seen[key] {
 			continue
@@ -252,13 +259,9 @@ func codexContext(db *sql.DB, id, codexID, workspace string) (string, error) {
 	}
 	sort.Slice(selected, func(i, j int) bool { return selected[i].id > selected[j].id })
 	for _, item := range selected {
-		created, err := time.Parse(time.RFC3339Nano, item.createdAt)
-		if err != nil {
-			return "", fmt.Errorf("invalid session event time for event %d: %w", item.id, err)
-		}
 		content := codexExcerpt(item.content)
 		fmt.Fprintf(&b, "Historical %s #%d at %s: %q\n", item.kind, item.id,
-			created.UTC().Format("2006-01-02 15:04:05 UTC"), content)
+			item.created.Format("2006-01-02 15:04:05 UTC"), content)
 	}
 	if len(selected) > 0 {
 		b.WriteString("Previous notes may be stale. Check current files and tool results.\n")

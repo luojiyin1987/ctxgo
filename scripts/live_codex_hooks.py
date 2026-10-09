@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -90,14 +91,41 @@ def prepare(root, model):
     return project, home, data
 
 
+def stop_process_group(proc):
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.stdout.close()
+        proc.stderr.close()
+        proc.wait(timeout=5)
+
+
+def run_process_group(args, env, timeout):
+    proc = subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, start_new_session=True)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        stop_process_group(proc)
+        raise RuntimeError(f"Codex call timed out after {timeout}s") from exc
+    except KeyboardInterrupt:
+        stop_process_group(proc)
+        raise
+    return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
+
+
 def run_codex(root, project, home, data_dir, label, args, timeout):
     command = "cd " + shlex.quote(str(project)) + " && codex-fast " + shlex.join(args)
     env = os.environ.copy()
     env.update({"CODEX_HOME": str(home), "CTXGO_DATA_DIR": str(data_dir),
                 "CTXGO_E2E_ROOT": str(root),
                 "PATH": str(root / "bin") + os.pathsep + env.get("PATH", "")})
-    result = subprocess.run(["zsh", "-lic", command], env=env,
-                            input="", text=True, capture_output=True, timeout=timeout)
+    result = run_process_group(["zsh", "-lic", command], env, timeout)
     (root / f"{label}.stdout.jsonl").write_text(result.stdout)
     (root / f"{label}.stderr.log").write_text(result.stderr)
     events = read_jsonl(result.stdout)

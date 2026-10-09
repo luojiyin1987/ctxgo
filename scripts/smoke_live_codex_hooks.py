@@ -3,10 +3,15 @@
 
 from pathlib import Path
 import json
+import os
+import shlex
+import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import live_codex_hooks as harness
@@ -62,6 +67,37 @@ def main():
             pass
         else:
             raise SystemExit("the harness accepted a duplicate SQLite event")
+        pid_file = root / "child.pid"
+        parent = ("import subprocess,sys,time; "
+                  "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); "
+                  "open(sys.argv[1],'w').write(str(child.pid)); time.sleep(30)")
+        command = [sys.executable, "-c", parent, str(pid_file)]
+        timeout = 2
+        if shutil.which("zsh"):
+            command = ["zsh", "-lic", shlex.join(command)]
+            timeout = 5
+        try:
+            harness.run_process_group(command, os.environ.copy(), timeout)
+        except RuntimeError as exc:
+            if "timed out" not in str(exc):
+                raise
+        else:
+            raise SystemExit("the process group did not time out")
+        if not pid_file.exists():
+            raise SystemExit("the child process did not start")
+        child_pid = int(pid_file.read_text())
+        for _ in range(20):
+            status = Path(f"/proc/{child_pid}/stat")
+            try:
+                state = status.read_text().split(") ", 1)[1][0]
+            except FileNotFoundError:
+                break
+            if state in "ZX":
+                break
+            time.sleep(0.05)
+        else:
+            os.kill(child_pid, signal.SIGKILL)
+            raise SystemExit("the timed-out child process survived")
     print("live harness gate OK")
 
 
