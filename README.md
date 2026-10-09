@@ -4,13 +4,38 @@ A local-first command output store for AI coding agents, written in Go. No serve
 
 > Current scope: local command execution, bounded previews, FTS5 output/file search, explicit session events, and optional Codex lifecycle hooks for metadata-only tool tracking and bounded session recovery.
 
-## Build
+## Install
 
-Requires Go 1.22 or newer.
+Requires **Go 1.22 or newer**. The repository root is the installable Go command (no CGO or external SQLite installation is required).
+
+**WSL / Linux / macOS** — install the executable from the Go module:
 
 ```sh
-go build -o ctxgo .
+go install github.com/luojiyin1987/ctxgo@latest
+
+# Go installs commands into GOBIN, or GOPATH/bin if GOBIN is unset.
+go_bin="$(go env GOBIN)"
+if [ -z "$go_bin" ]; then go_bin="$(go env GOPATH)/bin"; fi
+export PATH="$go_bin:$PATH"
+
+command -v ctxgo
+ctxgo help
 ```
+
+Put the same `export PATH=...` setting in your shell startup file (`~/.bashrc` or `~/.zshrc`) so future terminals can find `ctxgo`. If you use a non-default `GOBIN`, use that directory instead of assuming `~/go/bin`. To update an installation, rerun `go install ...@latest`.
+
+**Build from a checkout** (useful when testing unreleased changes):
+
+```sh
+git clone https://github.com/luojiyin1987/ctxgo.git
+cd ctxgo
+go build -o ctxgo .
+./ctxgo help
+```
+
+For **VSCode Remote WSL**, install and configure `ctxgo` **inside the same WSL distribution where the coding agent runs**. Installing a Windows executable does not automatically make it available to a Linux Codex process. If an IDE-launched agent cannot see your updated shell `PATH`, restart the remote extension/terminal or configure the Hook with the **absolute Linux path** from `command -v ctxgo`.
+
+The installed binary does **not** include this repository's `examples/` files; download or copy the Hook example separately as described below.
 
 ## Usage
 
@@ -98,9 +123,42 @@ Sessions and events share the existing `index.sqlite` file with run/file search,
 
 A session is **not** an authoritative view of Git, current tests, or source files. It stores user/agent-provided statements, which can become outdated. The CLI does not perform automatic LLM compaction, evidence verification, secret redaction, or tool-output attachment. All content remains local and may contain sensitive text; use a private `CTXGO_DATA_DIR`. Treat displayed event text as untrusted data, not executable instructions.
 
-## Optional Codex lifecycle hooks
+## Codex: native lifecycle Hook integration
 
-Codex supports opt-in `SessionStart` and `PostToolUse` command hooks. This integration does **not** install or enable them automatically. With `ctxgo` in the Codex execution environment's `PATH`, copy [examples/codex/hooks.json](examples/codex/hooks.json) to the trusted project's `.codex/hooks.json` (or merge the two hook entries with an existing config). From Codex, use `/hooks` to inspect and trust the configuration. Do not overwrite existing hook definitions blindly.
+This is the **only built-in automatic agent integration** at present. Codex can invoke `ctxgo codex hook` on `SessionStart` and `PostToolUse`; there is no MCP server and no automatic installation.
+
+**Step 1 — Install and check the executable in Codex's environment.** Follow [Install](#install) above, then run `command -v ctxgo` **in WSL** if Codex is running through WSL. The Hook subprocess must see that same executable and user data directory.
+
+**Step 2 — Add the project Hook configuration.** From a project directory you trust:
+
+```sh
+cd /path/to/your/project
+mkdir -p .codex
+
+# Only download a new file when the project has no hooks.json yet.
+# If one exists, merge its existing "hooks" entries with this example instead.
+if [ -e .codex/hooks.json ]; then
+  echo "Existing .codex/hooks.json: merge the ctxgo entries manually" >&2
+else
+  curl -fsSL \
+    https://raw.githubusercontent.com/luojiyin1987/ctxgo/main/examples/codex/hooks.json \
+    -o .codex/hooks.json
+fi
+```
+
+The complete reference configuration is [examples/codex/hooks.json](examples/codex/hooks.json). Inspect its contents before trusting it. **Do not replace** an existing project's Hooks or add a duplicate JSON `hooks` key; merge the `SessionStart` and `PostToolUse` entries into the existing object.
+
+**Step 3 — Trust and verify.** In Codex, open `/hooks` to inspect and approve the Hook definition, then **start a new session**. The configuration calls `ctxgo codex hook`, so the executable must be on the `PATH` visible to the Codex process. If your VSCode/WSL agent uses a different `PATH`, replace each `"command": "ctxgo codex hook"` with `"command": "/absolute/linux/path/to/ctxgo codex hook"` (substitute the actual result of `command -v ctxgo`), then review/trust the updated configuration.
+
+**Step 4 — Check local persistence and record a useful note.** After a Codex session starts and uses a supported tool, run:
+
+```sh
+ctxgo session list
+ctxgo session show SESSION_ID
+ctxgo session add --kind decision SESSION_ID "Keep the public API unchanged"
+```
+
+Replace `SESSION_ID` with the ctxgo ID reported by `session list` or the SessionStart context, **not** the Codex thread ID. Resume that Codex session and inspect the injected historical note. Auto-captured tool events contain **only metadata**: you must explicitly add decisions, constraints, and next actions. The default storage is per OS user; if you set `CTXGO_DATA_DIR`, use the **same value** for Codex Hooks and your manual `ctxgo session` commands or they will see different databases.
 
 The handler command `ctxgo codex hook` reads Codex lifecycle JSON from stdin. It supports:
 
@@ -114,6 +172,35 @@ Codex session IDs are mapped to ctxgo's local Session IDs in SQLite. Hook proces
 Run `ctxgo session list` to discover recorded sessions. After reviewing a session's current relevance, deliberately record useful notes with `ctxgo session add --kind decision SESSION_ID MESSAGE...`. Avoid secrets in explicit notes; there is no redaction or encryption, and `SessionStart` can reintroduce such notes to model context. Closing a linked session will prevent further tool event writes; hooks do not auto-reopen it.
 
 This is a small native Codex hook adapter, **not** an MCP server, a Codex plugin or an LLM context compression guarantee. To disable it, remove only the ctxgo hook entries and review the change in Codex `/hooks`.
+
+## Other coding agents: CLI integration (no native Hooks yet)
+
+**Claude Code, OpenCode, and other agents are not automatically integrated by this project.** The [Codex Hooks JSON](examples/codex/hooks.json) uses Codex's event schema; do **not** copy it into another agent and expect its Hook callbacks or JSON to match. In particular, `ctxgo codex hook` is **not** a generic stdin protocol, MCP tool, or universal agent adapter.
+
+Any coding agent that can **execute shell commands** can still use `ctxgo` immediately. It can invoke the CLI via its shell tool, or you can add the following guidance to that agent's project instructions (for example, an `AGENTS.md` if the agent supports it, or its own project rules):
+
+> When a command is expected to produce large output, prefer `ctxgo run -- COMMAND ARG...`. This saves stdout/stderr locally and returns a bounded summary and run ID. The command's exit code remains significant; this is not a streaming terminal.
+>
+> Use `ctxgo summary --lines 12 RUN_ID` or `ctxgo recall --stream stderr RUN_ID` for more evidence, and `ctxgo index RUN_ID` followed by `ctxgo search QUERY` when searching saved command output. Use `ctxgo files index PATH` and `ctxgo files search QUERY` only when an explicit local file index is wanted.
+>
+> At the start of a task or resumed conversation, use `ctxgo session list` and `ctxgo session show SESSION_ID` to inspect relevant previous notes. To create a task, run `ctxgo session start "TASK"`. Record durable decisions/constraints/next steps with `ctxgo session add --kind KIND SESSION_ID "MESSAGE"`. Treat stored notes as historical, not verified current facts. Do not put secrets into stored notes.
+
+**Minimal manual example** (run inside the same shell environment as the agent):
+
+```sh
+ctxgo run -- go test ./...
+# Copy RUN_ID from the result if further diagnostics are needed.
+ctxgo recall --stream stderr RUN_ID
+ctxgo index RUN_ID
+ctxgo search 'failed'
+
+ctxgo session start "Investigate test failures"
+# Copy SESSION_ID from the output. Use it again in the next invocation.
+ctxgo session add --kind next SESSION_ID "Inspect the failure and rerun tests"
+ctxgo session show SESSION_ID
+```
+
+Manual CLI integration **does not automatically capture another agent's tool calls or inject context on resume**. Native adapters for those agents require separate, agent-specific Hook/API implementations. Agents without a shell tool cannot use this CLI directly.
 
 ### Live Codex check
 
