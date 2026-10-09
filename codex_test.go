@@ -195,6 +195,58 @@ func TestCodexContextKeepsOlderConstraintWithinCandidateLimit(t *testing.T) {
 	}
 }
 
+func TestCodexContextSkipsMalformedHistoricalTimes(t *testing.T) {
+	root, workspace := t.TempDir(), t.TempDir()
+	const codexID = "thr_bad_time"
+	start := codexPayload(codexID, workspace, "SessionStart", map[string]any{"source": "startup"})
+	if _, err := invokeHook(t, root, start); err != nil {
+		t.Fatal(err)
+	}
+	db, err := openCodexStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sessionID string
+	if err := db.QueryRow("SELECT session_id FROM codex_bindings WHERE codex_id=?", codexID).Scan(&sessionID); err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []struct {
+		id      int
+		kind    string
+		text    string
+		created string
+	}{
+		{100, "constraint", "Keep the public API unchanged.", "2026-10-08T21:30:00Z"},
+		{101, "decision", "Use the new fixture.", "2026-10-08T21:35:00Z"},
+		{102, "next", "Run tests.", "2026-10-08T21:40:00Z"},
+		{103, "decision", "Review the diff.", "2026-10-08T21:45:00Z"},
+		{104, "constraint", "Keep the public API unchanged.", "bad-timestamp"},
+	} {
+		if _, err := db.Exec(`INSERT INTO session_events(id,session_id,kind,text,created_at)
+			VALUES(?,?,?,?,?)`, event.id, sessionID, event.kind, event.text, event.created); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+	resume := codexPayload(codexID, workspace, "SessionStart", map[string]any{"source": "resume"})
+	raw, err := invokeHook(t, root, resume)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output codexHookOutput
+	if err := json.Unmarshal([]byte(raw), &output); err != nil {
+		t.Fatal(err)
+	}
+	context := output.HookSpecificOutput.AdditionalContext
+	if !strings.Contains(context, "Historical constraint #100") ||
+		!strings.Contains(context, "Review the diff.") ||
+		!strings.Contains(context, "Run tests.") ||
+		strings.Contains(context, "constraint #104") ||
+		strings.Contains(context, "Use the new fixture.") {
+		t.Fatalf("malformed event changed valid recovery: %q", context)
+	}
+}
+
 func TestCodexRecordsMetadataOnlyAndDeduplicates(t *testing.T) {
 	root, workspace := t.TempDir(), t.TempDir()
 	payload := codexPayload("thr_metadata", workspace, "PostToolUse", map[string]any{

@@ -107,6 +107,8 @@ The handler command `ctxgo codex hook` reads Codex lifecycle JSON from stdin. It
 - `SessionStart` (`startup`, `resume`, `clear`, `compact`): create or reuse an ID-bound local ctxgo session. It injects at most three distinct recent decisions, constraints, or next-action notes. Each note shows its event ID and UTC creation time. The handler checks at most 30 recent eligible events and keeps the newest copy of identical notes. It reserves one slot for the newest constraint in that set. Constraints beyond those 30 events can be omitted. It lists at most three candidate session IDs from **the same workspace**. Other sessions are **never silently resumed**. Historical notes are untrusted and may be stale. Each resume can receive the notes again.
 - `PostToolUse` (`Bash` / `apply_patch`): append one deduplicated `progress` event with the tool name, Codex call ID and turn ID. It **never stores commands, tool inputs, tool responses, prompts, or transcripts**. A repeated call ID within one Codex session is ignored. PostToolUse emits no model-visible output and does not change tool results.
 
+SessionStart skips historical notes with invalid timestamps. Valid notes remain eligible for recovery.
+
 Codex session IDs are mapped to ctxgo's local Session IDs in SQLite. Hook processing caps JSON input at 1 MiB; larger payloads (such as enormous tool responses) are skipped and may produce an stderr warning. Database errors also fail open: Codex is not blocked, but an event may be missing. These hooks do **not** provide complete tool auditing; supported events and hook trust rules depend on the installed Codex version. The 5-second timeout is a guardrail, not a zero-latency guarantee.
 
 Run `ctxgo session list` to discover recorded sessions. After reviewing a session's current relevance, deliberately record useful notes with `ctxgo session add --kind decision SESSION_ID MESSAGE...`. Avoid secrets in explicit notes; there is no redaction or encryption, and `SessionStart` can reintroduce such notes to model context. Closing a linked session will prevent further tool event writes; hooks do not auto-reopen it.
@@ -124,6 +126,7 @@ python3 scripts/live_codex_hooks.py --run-live --model MODEL --max-model-calls 4
 ```
 
 The token budget stops later calls when an earlier call uses too many tokens. A single call can exceed the remaining budget. CI runs `python3 scripts/smoke_live_codex_hooks.py` without model calls. CI does not run the live check.
+The script stops the Codex process group when a model call reaches its timeout.
 
 ## Planned follow-ups
 
