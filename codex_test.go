@@ -87,6 +87,66 @@ func TestCodexStartResumeAndOnDemandHistory(t *testing.T) {
 	}
 }
 
+func TestCodexContextShowsEventSourceAndDeduplicatesNotes(t *testing.T) {
+	root, workspace := t.TempDir(), t.TempDir()
+	const codexID = "thr_freshness"
+	start := codexPayload(codexID, workspace, "SessionStart", map[string]any{"source": "startup"})
+	if _, err := invokeHook(t, root, start); err != nil {
+		t.Fatal(err)
+	}
+	db, err := openCodexStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sessionID string
+	if err := db.QueryRow("SELECT session_id FROM codex_bindings WHERE codex_id=?", codexID).Scan(&sessionID); err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []struct {
+		id      int
+		kind    string
+		text    string
+		created string
+	}{
+		{40, "decision", "An older decision.", "2026-10-08T21:20:00Z"},
+		{41, "decision", "Keep the public API unchanged.", "2026-10-08T21:30:00+02:00"},
+		{42, "constraint", "Check the current branch.", "2026-10-08T23:35:00+02:00"},
+		{43, "decision", "Keep the public API unchanged.", "2026-10-08T21:45:00Z"},
+		{44, "next", "Run CI.", "2026-10-08T21:50:00Z"},
+	} {
+		if _, err := db.Exec(`INSERT INTO session_events(id,session_id,kind,text,created_at)
+			VALUES(?,?,?,?,?)`, event.id, sessionID, event.kind, event.text, event.created); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+	resume := codexPayload(codexID, workspace, "SessionStart", map[string]any{"source": "resume"})
+	for i := 0; i < 2; i++ {
+		raw, err := invokeHook(t, root, resume)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var response codexHookOutput
+		if err := json.Unmarshal([]byte(raw), &response); err != nil {
+			t.Fatal(err)
+		}
+		context := response.HookSpecificOutput.AdditionalContext
+		if strings.Count(context, "Keep the public API unchanged.") != 1 ||
+			!strings.Contains(context, "decision #43 at 2026-10-08 21:45:00 UTC") ||
+			strings.Contains(context, "decision #41") ||
+			strings.Contains(context, "decision #40") ||
+			!strings.Contains(context, "constraint #42 at 2026-10-08 21:35:00 UTC") ||
+			!strings.Contains(context, "next #44 at 2026-10-08 21:50:00 UTC") ||
+			!strings.Contains(context, "Previous notes may be stale") {
+			t.Fatalf("resume %d returned incorrect context: %q", i, context)
+		}
+		if strings.Index(context, "next #44") > strings.Index(context, "decision #43") ||
+			strings.Index(context, "decision #43") > strings.Index(context, "constraint #42") {
+			t.Fatalf("resume %d returned incorrect event order: %q", i, context)
+		}
+	}
+}
+
 func TestCodexRecordsMetadataOnlyAndDeduplicates(t *testing.T) {
 	root, workspace := t.TempDir(), t.TempDir()
 	payload := codexPayload("thr_metadata", workspace, "PostToolUse", map[string]any{

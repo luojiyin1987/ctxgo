@@ -104,7 +104,7 @@ Codex supports opt-in `SessionStart` and `PostToolUse` command hooks. This integ
 
 The handler command `ctxgo codex hook` reads Codex lifecycle JSON from stdin. It supports:
 
-- `SessionStart` (`startup`, `resume`, `clear`, `compact`): create or reuse an ID-bound local ctxgo session, then inject a bounded reference to that session and at most three recent explicit decisions, constraints, or next-action notes. It lists at most three candidate session IDs from **the same workspace**; other sessions are **never silently resumed**. Historical notes are untrusted and may be stale.
+- `SessionStart` (`startup`, `resume`, `clear`, `compact`): create or reuse an ID-bound local ctxgo session. It injects at most three distinct recent decisions, constraints, or next-action notes. Each note shows its event ID and UTC creation time. The handler checks at most 30 recent eligible events and keeps the newest copy of identical notes. It lists at most three candidate session IDs from **the same workspace**. Other sessions are **never silently resumed**. Historical notes are untrusted and may be stale. Each resume can receive the notes again.
 - `PostToolUse` (`Bash` / `apply_patch`): append one deduplicated `progress` event with the tool name, Codex call ID and turn ID. It **never stores commands, tool inputs, tool responses, prompts, or transcripts**. A repeated call ID within one Codex session is ignored. PostToolUse emits no model-visible output and does not change tool results.
 
 Codex session IDs are mapped to ctxgo's local Session IDs in SQLite. Hook processing caps JSON input at 1 MiB; larger payloads (such as enormous tool responses) are skipped and may produce an stderr warning. Database errors also fail open: Codex is not blocked, but an event may be missing. These hooks do **not** provide complete tool auditing; supported events and hook trust rules depend on the installed Codex version. The 5-second timeout is a guardrail, not a zero-latency guarantee.
@@ -112,6 +112,18 @@ Codex session IDs are mapped to ctxgo's local Session IDs in SQLite. Hook proces
 Run `ctxgo session list` to discover recorded sessions. After reviewing a session's current relevance, deliberately record useful notes with `ctxgo session add --kind decision SESSION_ID MESSAGE...`. Avoid secrets in explicit notes; there is no redaction or encryption, and `SessionStart` can reintroduce such notes to model context. Closing a linked session will prevent further tool event writes; hooks do not auto-reopen it.
 
 This is a small native Codex hook adapter, **not** an MCP server, a Codex plugin or an LLM context compression guarantee. To disable it, remove only the ctxgo hook entries and review the change in Codex `/hooks`.
+
+### Live Codex check
+
+The live check uses `codex-fast` from the WSL login shell. It makes four model calls in a private temporary project. It tests startup, two resumes, Bash, `apply_patch`, and a database failure. It writes `summary.json` and hook timing records in the output directory. The script removes its temporary auth link after the check.
+
+Run it only when you want to spend model tokens:
+
+```bash
+python3 scripts/live_codex_hooks.py --run-live --model MODEL --max-model-calls 4 --timeout-seconds 120 --token-budget 150000
+```
+
+The token budget stops later calls when an earlier call uses too many tokens. A single call can exceed the remaining budget. The script does not run in CI. Run `python3 scripts/smoke_live_codex_hooks.py` to check its live gate without model calls.
 
 ## Planned follow-ups
 
