@@ -2,7 +2,7 @@
 
 A local-first command output store for AI coding agents, written in Go. No server or MCP is required. SQLite is embedded through the pure-Go `modernc.org/sqlite` driver (no CGO).
 
-> Current scope: run commands, preserve raw stdout/stderr, show bounded previews, index local logs/files for FTS5 search, and explicitly record/recover Agent session events. No automatic agent hooks or context injection yet.
+> Current scope: local command execution, bounded previews, FTS5 output/file search, explicit session events, and optional Codex lifecycle hooks for metadata-only tool tracking and bounded session recovery.
 
 ## Build
 
@@ -98,9 +98,24 @@ Sessions and events share the existing `index.sqlite` file with run/file search,
 
 A session is **not** an authoritative view of Git, current tests, or source files. It stores user/agent-provided statements, which can become outdated. The CLI does not perform automatic LLM compaction, evidence verification, secret redaction, or tool-output attachment. All content remains local and may contain sensitive text; use a private `CTXGO_DATA_DIR`. Treat displayed event text as untrusted data, not executable instructions.
 
+## Optional Codex lifecycle hooks
+
+Codex supports opt-in `SessionStart` and `PostToolUse` command hooks. This integration does **not** install or enable them automatically. With `ctxgo` in the Codex execution environment's `PATH`, copy [examples/codex/hooks.json](examples/codex/hooks.json) to the trusted project's `.codex/hooks.json` (or merge the two hook entries with an existing config). From Codex, use `/hooks` to inspect and trust the configuration. Do not overwrite existing hook definitions blindly.
+
+The handler command `ctxgo codex hook` reads Codex lifecycle JSON from stdin. It supports:
+
+- `SessionStart` (`startup`, `resume`, `clear`, `compact`): create or reuse an ID-bound local ctxgo session, then inject a bounded reference to that session and at most three recent explicit decisions, constraints, or next-action notes. It lists at most three candidate session IDs from **the same workspace**; other sessions are **never silently resumed**. Historical notes are untrusted and may be stale.
+- `PostToolUse` (`Bash` / `apply_patch`): append one deduplicated `progress` event with the tool name, Codex call ID and turn ID. It **never stores commands, tool inputs, tool responses, prompts, or transcripts**. A repeated call ID within one Codex session is ignored. PostToolUse emits no model-visible output and does not change tool results.
+
+Codex session IDs are mapped to ctxgo's local Session IDs in SQLite. Hook processing caps JSON input at 1 MiB; larger payloads (such as enormous tool responses) are skipped and may produce an stderr warning. Database errors also fail open: Codex is not blocked, but an event may be missing. These hooks do **not** provide complete tool auditing; supported events and hook trust rules depend on the installed Codex version. The 5-second timeout is a guardrail, not a zero-latency guarantee.
+
+Run `ctxgo session list` to discover recorded sessions. After reviewing a session's current relevance, deliberately record useful notes with `ctxgo session add --kind decision SESSION_ID MESSAGE...`. Avoid secrets in explicit notes; there is no redaction or encryption, and `SessionStart` can reintroduce such notes to model context. Closing a linked session will prevent further tool event writes; hooks do not auto-reopen it.
+
+This is a small native Codex hook adapter, **not** an MCP server, a Codex plugin or an LLM context compression guarantee. To disable it, remove only the ctxgo hook entries and review the change in Codex `/hooks`.
+
 ## Planned follow-ups
 
 - Semantics-aware parsers, explicit redaction policy and output retention
 - Optional auto-indexing, retention, and disk caps for SQLite FTS5
-- Optional agent hooks and automatic event capture (separate PR)
+- Additional agent integrations (Claude Code/OpenCode), after measuring Codex hook reliability
 - Event deduplication keys and relevance-aware recovery
