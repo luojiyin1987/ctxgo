@@ -22,6 +22,12 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code -- go.mod go.sum
+      - name: Capture gofmt for UTF-8 regression tests
+        run: |
+          gofmt -w codex_test.go
+          echo '=== FORMATTED TEST BEGIN ==='
+          cat codex_test.go
+          echo '=== FORMATTED TEST END ==='
       - name: Verify formatting
         run: test -z "$(gofmt -l .)"
       - name: Test
