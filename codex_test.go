@@ -91,7 +91,7 @@ func TestCodexRecordsMetadataOnlyAndDeduplicates(t *testing.T) {
 	root, workspace := t.TempDir(), t.TempDir()
 	payload := codexPayload("thr_metadata", workspace, "PostToolUse", map[string]any{
 		"tool_name": "Bash", "tool_use_id": "call_42", "turn_id": "turn_9",
-		"tool_input": map[string]any{"command": "SECRET_COMMAND_LINE"},
+		"tool_input":    map[string]any{"command": "SECRET_COMMAND_LINE"},
 		"tool_response": map[string]any{"output": "SECRET_TOOL_OUTPUT", "exit_code": 17},
 	})
 	for i := 0; i < 3; i++ {
