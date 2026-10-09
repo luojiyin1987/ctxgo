@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 )
 
 func codexPayload(session, cwd, event string, extras map[string]any) string {
@@ -267,5 +268,68 @@ func TestCodexHookOutputReferencesWorkspace(t *testing.T) {
 	}
 	if !strings.Contains(result, "ctxgo session show") {
 		t.Fatalf("missing recall instruction: %s", result)
+	}
+}
+
+func TestCodexExcerptPreservesUTF8Boundaries(t *testing.T) {
+	tests := []struct {
+		name string
+		input string
+		want string
+	}{
+		{"short", "中文", "中文"},
+		{"exactly 160 bytes", strings.Repeat("a", 160), strings.Repeat("a", 160)},
+		{"ASCII truncated", strings.Repeat("a", 161), strings.Repeat("a", 160) + " [excerpt]"},
+		{"three-byte boundary", strings.Repeat("a", 159) + "中tail", strings.Repeat("a", 159) + " [excerpt]"},
+		{"all Chinese", strings.Repeat("中", 54), strings.Repeat("中", 53) + " [excerpt]"},
+		{"four-byte boundary", strings.Repeat("🙂", 39) + "abc🙂tail", strings.Repeat("🙂", 39) + "abc" + " [excerpt]"},
+		{"exact emoji boundary", strings.Repeat("🙂", 40) + "tail", strings.Repeat("🙂", 40) + " [excerpt]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := codexExcerpt(tt.input)
+			if got != tt.want {
+				t.Fatalf("excerpt got %q, want %q", got, tt.want)
+			}
+			if !utf8.ValidString(got) || strings.ContainsRune(got, utf8.RuneError) {
+				t.Fatalf("invalid UTF-8 in excerpt: %q", got)
+			}
+		})
+	}
+}
+
+func TestCodexStartRestoreUnicodeExcerpt(t *testing.T) {
+	root, workspace := t.TempDir(), t.TempDir()
+	const codexID = "thr_multibyte"
+	_, err := invokeHook(t, root, codexPayload(codexID, workspace, "SessionStart", map[string]any{"source": "startup"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := openCodexStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sessionID string
+	if err := db.QueryRow("SELECT session_id FROM codex_bindings WHERE codex_id=?", codexID).Scan(&sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := addSessionEvent(db, sessionID, "constraint", strings.Repeat("a", 159) + "中tail"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := invokeHook(t, root, codexPayload(codexID, workspace, "SessionStart", map[string]any{"source": "resume"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response codexHookOutput
+	if err := json.Unmarshal([]byte(raw), &response); err != nil {
+		t.Fatalf("invalid JSON output: %v", err)
+	}
+	context := response.HookSpecificOutput.AdditionalContext
+	if !utf8.ValidString(context) || !strings.Contains(context, strings.Repeat("a", 159)+" [excerpt]") ||
+		strings.Contains(context, "\ufffd") {
+		t.Fatalf("restored context corrupted UTF-8: %q", context)
 	}
 }
