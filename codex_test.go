@@ -313,7 +313,7 @@ func TestCodexStartRestoreUnicodeExcerpt(t *testing.T) {
 	if err := db.QueryRow("SELECT session_id FROM codex_bindings WHERE codex_id=?", codexID).Scan(&sessionID); err != nil {
 		t.Fatal(err)
 	}
-	if err := addSessionEvent(db, sessionID, "constraint", strings.Repeat("a", 159) + "中tail"); err != nil {
+	if err := addSessionEvent(db, sessionID, "constraint", strings.Repeat("a", 159)+"中tail"); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
