@@ -6,7 +6,9 @@ A local-first command output store for AI coding agents, written in Go. No serve
 
 ## Install
 
-Requires **Go 1.22 or newer**. The repository root is the installable Go command (no CGO or external SQLite installation is required).
+Building from source requires **Go 1.22 or newer**. The repository root is the installable Go command (no CGO or external SQLite installation is required).
+
+Download a ready-to-run archive from [GitHub Releases](https://github.com/luojiyin1987/ctxgo/releases). Packages cover Linux, macOS, and Windows on amd64 and arm64. Each archive includes `ctxgo`, `README.md`, and `LICENSE`. Check the archive against `SHA256SUMS` before use.
 
 **WSL / Linux / macOS** — install the executable from the Go module:
 
@@ -93,7 +95,10 @@ On Linux (including WSL), timeout or interruption kills the spawned process grou
 ```sh
 go test ./...
 go vet ./...
+bash scripts/smoke-package-release.sh
 ```
+
+The release workflow builds packages when a `vX.Y.Z` tag reaches GitHub. It tests the tagged source before release. It also has a manual action for an existing tag. The manual action uses the workflow from the selected branch and builds the tagged source. To make packages locally, run `scripts/package-release.sh --help`.
 
 ## Local search index
 
