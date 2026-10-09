@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -270,5 +269,3 @@ func TestCodexHookOutputReferencesWorkspace(t *testing.T) {
 		t.Fatalf("missing recall instruction: %s", result)
 	}
 }
-
-var _ *sql.DB
