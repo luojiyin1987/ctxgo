@@ -273,9 +273,9 @@ func TestCodexHookOutputReferencesWorkspace(t *testing.T) {
 
 func TestCodexExcerptPreservesUTF8Boundaries(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		input string
-		want string
+		want  string
 	}{
 		{"short", "中文", "中文"},
 		{"exactly 160 bytes", strings.Repeat("a", 160), strings.Repeat("a", 160)},
